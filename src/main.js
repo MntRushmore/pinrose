@@ -241,7 +241,7 @@ const tipQ = new THREE.Quaternion();
 const trackQ = new THREE.Quaternion();
 const yAxis = new THREE.Vector3(0, 1, 0);
 
-const spawnLocal = new THREE.Vector3(-1.25, beamTop + BALL_R + 0.03, 0);
+const spawnLocal = new THREE.Vector3(-0.9, beamTop + BALL_R + 0.03, 0);
 
 const overlay = document.getElementById('overlay');
 const roastEl = document.getElementById('roast');
@@ -394,10 +394,13 @@ function applyTrackPose() {
 
 function seatBall() {
   tmpV.copy(spawnLocal).applyQuaternion(trackQ);
+  ballBody.type = CANNON.Body.KINEMATIC;
   ballBody.position.set(tmpV.x, tmpV.y, tmpV.z);
   ballBody.velocity.set(0, 0, 0);
   ballBody.angularVelocity.set(0, 0, 0);
   ballBody.quaternion.set(0, 0, 0, 1);
+  ballMesh.position.copy(ballBody.position);
+  ballMesh.quaternion.copy(ballBody.quaternion);
 }
 
 function layoutPin() {
@@ -500,6 +503,8 @@ function releaseCharge() {
   tipVel = 9 + shot * 10;
   applyTrackPose();
   seatBall();
+  ballBody.type = CANNON.Body.DYNAMIC;
+  ballBody.wakeUp();
   applyImpulse(shot);
   phase = 'flying';
 }
