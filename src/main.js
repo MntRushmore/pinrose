@@ -1,14 +1,12 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as CANNON from 'cannon-es';
 
 const VOID = 0xc9c9a5;
 const YELLOW = 0xf5d13a;
 const BALL_R = 0.2;
-const CHARGE_T = 0.9;
-const WIND_MAX = (22 * Math.PI) / 180;
-const SNAP_MAX = (14 * Math.PI) / 180;
-const WALL_H = 0.28;
-const WALL_T = 0.08;
+const TIP_MAX = (20 * Math.PI) / 180;
+const DEPTH = 1.1;
 const BEST_KEY = 'pinrose:best';
 const ROASTS = [
   'airball',
@@ -16,17 +14,27 @@ const ROASTS = [
   'that was a choice',
   'gravity 1, you 0',
   'didn’t even wave',
-  'commit, then miss',
-  'so close to a vibe',
   'the 7 is unimpressed',
-  'charge harder. or less',
+  'so close to a vibe',
   'pin still waiting',
+  'roll, don’t yeet',
+  'off the plastic',
 ];
+
+const X0 = -1.58;
+const X1 = 1.38;
+const X2 = 1.86;
+const Y0 = -0.14;
+const Y1 = 1.42;
+const Y2 = 1.86;
+const RLIP = Y2 - Y1;
+const RFLARE = 0.68;
+const RCORN = 0.26;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(VOID);
 
-const frustum = 4.4;
+const frustum = 4.35;
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -40, 60);
 function fitCamera() {
   const a = innerWidth / innerHeight;
@@ -36,8 +44,8 @@ function fitCamera() {
   camera.bottom = -frustum;
   camera.updateProjectionMatrix();
 }
-const camHome = new THREE.Vector3(14, 11.2, 14);
-const lookHome = new THREE.Vector3(0, 0.4, 0);
+const camHome = new THREE.Vector3(13.2, 10.6, 13.2);
+const lookHome = new THREE.Vector3(0.15, 0.55, 0);
 const lookNow = lookHome.clone();
 camera.position.copy(camHome);
 camera.lookAt(lookNow);
@@ -55,12 +63,13 @@ document.body.prepend(canvas);
 const ui = document.getElementById('ui');
 ui.style.zIndex = '2';
 
-scene.add(new THREE.AmbientLight(0xfff6d8, 0.95));
-const sun = new THREE.DirectionalLight(0xfff8e8, 0.7);
+scene.add(new THREE.AmbientLight(0xfff6d8, 0.98));
+const sun = new THREE.DirectionalLight(0xfff8e8, 0.68);
 sun.position.set(6, 16, 8);
 sun.castShadow = true;
 sun.shadow.mapSize.set(1024, 1024);
 scene.add(sun);
+scene.add(new THREE.HemisphereLight(0xfff4d0, 0xb8b48a, 0.28));
 
 const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -11, 0) });
 world.broadphase = new CANNON.SAPBroadphase(world);
@@ -69,33 +78,57 @@ world.allowSleep = false;
 const matTrack = new CANNON.Material('track');
 const matBall = new CANNON.Material('ball');
 world.addContactMaterial(new CANNON.ContactMaterial(matTrack, matBall, {
-  friction: 0.22,
-  restitution: 0.06,
+  friction: 0.38,
+  restitution: 0.04,
 }));
 
-const BEAM = [3.4, 0.22, 0.78, 0, 1.72, 0];
-const PILLAR = [0.24, 1.55, 0.78, 1.58, 0.835, 0];
-const parts = [BEAM, PILLAR];
-const beamTop = BEAM[4] + BEAM[1] / 2;
-const bumperH = 0.52;
-parts.push([0.18, bumperH, 0.78, -BEAM[0] / 2 + 0.06, beamTop + bumperH / 2, 0]);
-
-const flareMeshes = [];
-const flareOffsets = [];
-const flareAnchors = [];
-for (let i = 0; i < 6; i++) {
-  const t = (i + 0.5) / 6;
-  const px = 1.72 + t * 1.35;
-  const py = 0.12 - t * 0.08;
-  parts.push([0.46, 0.18, 0.7, px, py, 0]);
-  flareAnchors.push(new THREE.Vector3(px, py, 0));
+function makeSevenShape() {
+  const s = new THREE.Shape();
+  s.moveTo(X1, Y1);
+  s.lineTo(X0, Y1);
+  s.lineTo(X0 - RLIP, Y1);
+  s.absarc(X0, Y1, RLIP, Math.PI, Math.PI / 2, false);
+  s.lineTo(X2 - RCORN, Y2);
+  s.absarc(X2 - RCORN, Y2 - RCORN, RCORN, Math.PI / 2, 0, false);
+  s.lineTo(X2, Y0 + RFLARE);
+  s.absarc(X2, Y0, RFLARE, Math.PI / 2, 0, true);
+  s.lineTo(X2, Y0);
+  s.lineTo(X1, Y0);
+  s.lineTo(X1, Y1);
+  return s;
 }
-const flareTip0 = flareAnchors[flareAnchors.length - 1].clone();
+
+function latheQuarter(cx, cy, r, from, to, steps) {
+  const pts = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = from + (to - from) * (i / steps);
+    pts.push(new THREE.Vector2(cx + Math.cos(t) * r, cy + Math.sin(t) * r));
+  }
+  pts.push(new THREE.Vector2(cx, cy));
+  const g = new THREE.LatheGeometry(pts, 4);
+  return g;
+}
 
 const yellowMat = new THREE.MeshStandardMaterial({
-  color: YELLOW, roughness: 0.42, metalness: 0.04,
+  color: YELLOW,
+  roughness: 0.46,
+  metalness: 0.03,
 });
+
+const extrude = new THREE.ExtrudeGeometry(makeSevenShape(), {
+  depth: DEPTH,
+  bevelEnabled: false,
+  curveSegments: 24,
+});
+extrude.translate(0, 0, -DEPTH / 2);
+
+const merged = mergeGeometries([extrude], false);
+const seven = new THREE.Mesh(merged, yellowMat);
+seven.castShadow = true;
+seven.receiveShadow = true;
+
 const track = new THREE.Group();
+track.add(seven);
 scene.add(track);
 
 const trackBody = new CANNON.Body({
@@ -103,111 +136,105 @@ const trackBody = new CANNON.Body({
   material: matTrack,
   mass: 0,
 });
-const partMeshes = [];
-for (const [sx, sy, sz, px, py, pz] of parts) {
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), yellowMat);
-  mesh.position.set(px, py, pz);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  track.add(mesh);
-  partMeshes.push(mesh);
-  const shape = new CANNON.Box(new CANNON.Vec3(sx / 2, sy / 2, sz / 2));
-  trackBody.addShape(shape, new CANNON.Vec3(px, py, pz));
-}
-const beamMesh = partMeshes[0];
-const flareStart = 3;
-for (let i = 0; i < 6; i++) {
-  flareMeshes.push(partMeshes[flareStart + i]);
-  flareOffsets.push(trackBody.shapeOffsets[flareStart + i]);
+
+function addBox(sx, sy, sz, px, py, pz, rotZ = 0, visible = false) {
+  if (visible) {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), yellowMat);
+    mesh.position.set(px, py, pz);
+    mesh.rotation.z = rotZ;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    track.add(mesh);
+  }
+  const q = new CANNON.Quaternion();
+  if (rotZ) q.setFromAxisAngle(new CANNON.Vec3(0, 0, 1), rotZ);
+  trackBody.addShape(new CANNON.Box(new CANNON.Vec3(sx / 2, sy / 2, sz / 2)), new CANNON.Vec3(px, py, pz), q);
 }
 
-function addYellowBox(sx, sy, sz, px, py, pz) {
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), yellowMat);
-  mesh.position.set(px, py, pz);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  track.add(mesh);
-  trackBody.addShape(
-    new CANNON.Box(new CANNON.Vec3(sx / 2, sy / 2, sz / 2)),
-    new CANNON.Vec3(px, py, pz),
-  );
+const beamT = Y2 - Y1;
+const beamL = X1 - X0;
+const beamCx = (X0 + X1) / 2;
+const beamCy = (Y1 + Y2) / 2;
+const pillarW = X2 - X1;
+const pillarH = Y2 - Y0;
+const pillarCx = (X1 + X2) / 2;
+const pillarCy = (Y0 + Y2) / 2;
+
+addBox(beamL, beamT, DEPTH, beamCx, beamCy, 0);
+addBox(pillarW, pillarH, DEPTH, pillarCx, pillarCy, 0);
+
+const LIP_N = 5;
+for (let i = 0; i < LIP_N; i++) {
+  const a = Math.PI + ((Math.PI / 2) * (i + 0.5)) / LIP_N;
+  const px = X0 + Math.cos(a) * (RLIP * 0.52);
+  const py = Y1 + Math.sin(a) * (RLIP * 0.52);
+  addBox(RLIP * 0.55, beamT * 0.85, DEPTH - 0.04, px, py, 0, a + Math.PI / 2);
 }
-function addYellowBoxRot(sx, sy, sz, px, py, pz, rotZ) {
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), yellowMat);
-  mesh.position.set(px, py, pz);
-  mesh.rotation.z = rotZ;
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  track.add(mesh);
-  const q = new CANNON.Quaternion();
-  q.setFromAxisAngle(new CANNON.Vec3(0, 0, 1), rotZ);
-  trackBody.addShape(
-    new CANNON.Box(new CANNON.Vec3(sx / 2, sy / 2, sz / 2)),
-    new CANNON.Vec3(px, py, pz),
-    q,
-  );
+
+const FL_N = 6;
+const flareSlabs = [];
+for (let i = 0; i < FL_N; i++) {
+  const a = (Math.PI / 2) * (1 - (i + 0.5) / FL_N);
+  const px = X2 + Math.cos(a) * (RFLARE * 0.52);
+  const py = Y0 + Math.sin(a) * (RFLARE * 0.52);
+  addBox(RFLARE * 0.58, 0.34, DEPTH - 0.04, px, py, 0, a);
+  flareSlabs.push(trackBody.shapeOffsets[trackBody.shapes.length - 1]);
 }
-const zEdge = BEAM[2] / 2;
-const pillarBot = PILLAR[4] - PILLAR[1] / 2;
-const pillarOuterX = PILLAR[3] + PILLAR[0] / 2;
-const wallTop = beamTop + WALL_H;
-const QN = 6;
-const QR = 0.95;
-const QZ = BEAM[2] - 0.06;
-const qcx = pillarOuterX + 0.28;
-const qcy = beamTop;
-for (const z of [zEdge, -zEdge]) {
-  addYellowBox(BEAM[0], WALL_H, WALL_T, BEAM[3], beamTop + WALL_H / 2, z);
-  const sy = wallTop - pillarBot;
-  const wallSx = qcx - (PILLAR[3] - PILLAR[0] / 2) + 0.10;
-  addYellowBox(wallSx, sy, WALL_T, PILLAR[3] - PILLAR[0] / 2 + wallSx / 2, pillarBot + sy / 2, z);
+
+const CN = 4;
+for (let i = 0; i < CN; i++) {
+  const a = (Math.PI / 2) * (1 - (i + 0.5) / CN);
+  const px = (X2 - RCORN) + Math.cos(a) * (RCORN * 0.5);
+  const py = (Y2 - RCORN) + Math.sin(a) * (RCORN * 0.5);
+  addBox(RCORN * 0.7, 0.3, DEPTH - 0.06, px, py, 0, a - Math.PI / 2);
 }
-const QTH = 0.16;
-for (let i = 0; i < QN; i++) {
-  const th = (i / (QN - 1)) * (Math.PI / 2);
-  const surfX = qcx - QR * Math.cos(th);
-  const surfY = qcy - QR * Math.sin(th);
-  let sx = 0.42;
-  let px = surfX + (QTH / 2) * Math.sin(th);
-  let py = surfY - (QTH / 2) * Math.cos(th);
-  if (i === QN - 1) {
-    sx = surfY - pillarBot + 0.12;
-    px = qcx + QTH / 2;
-    py = (surfY + pillarBot) / 2;
-  }
-  addYellowBoxRot(sx, QTH, QZ, px, py, 0, th);
+
+const railH = 0.13;
+const railT = 0.06;
+const zR = DEPTH / 2 - 0.02;
+for (const z of [zR, -zR]) {
+  addBox(beamL + RLIP * 0.3, railH, railT, beamCx - 0.12, Y2 + railH / 2, z);
+  addBox(0.9, railH, railT, X2 + RFLARE * 0.35, Y0 + 0.22, z);
 }
-const lipH = 0.08;
-addYellowBox(WALL_T, lipH, BEAM[2] - WALL_T, qcx + QTH + WALL_T / 2, beamTop + lipH / 2, 0);
+addBox(railT, railH, DEPTH * 0.7, X0 - RLIP + 0.04, Y1 + 0.08, 0);
 
 const pinPts = [];
 const pinProfile = [
-  [0.00, 0.00], [0.16, 0.02], [0.18, 0.12], [0.12, 0.28],
-  [0.09, 0.48], [0.11, 0.62], [0.14, 0.78], [0.08, 0.92], [0.00, 1.00],
+  [0.00, 0.00], [0.155, 0.02], [0.175, 0.12], [0.118, 0.28],
+  [0.088, 0.48], [0.108, 0.62], [0.136, 0.78], [0.078, 0.92], [0.00, 1.00],
 ];
 for (const [x, y] of pinProfile) pinPts.push(new THREE.Vector2(x, y));
 const pin = new THREE.Mesh(
-  new THREE.LatheGeometry(pinPts, 18),
-  new THREE.MeshStandardMaterial({ color: 0xf4f4f0, roughness: 0.35 }),
+  new THREE.LatheGeometry(pinPts, 20),
+  new THREE.MeshStandardMaterial({ color: 0xf4f4f0, roughness: 0.32 }),
 );
 pin.castShadow = true;
-pin.scale.setScalar(0.55);
-pin.position.copy(flareTip0);
-pin.position.y += 0.18;
+pin.scale.setScalar(0.52);
+const ringMat = new THREE.MeshStandardMaterial({ color: 0xc62828, roughness: 0.4 });
+for (const hy of [0.72, 0.80]) {
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.078, 0.012, 8, 20), ringMat);
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = hy;
+  pin.add(ring);
+}
 track.add(pin);
 world.addBody(trackBody);
 
-const pinLocal = pin.position.clone();
+const flareTip0 = new THREE.Vector3(X2 + RFLARE * 0.82, Y0 + 0.16, 0);
+const pinLocal = flareTip0.clone();
+pin.position.copy(pinLocal);
+
 const pinBody = new CANNON.Body({
   type: CANNON.Body.KINEMATIC,
   mass: 0,
-  shape: new CANNON.Sphere(0.16),
+  shape: new CANNON.Sphere(0.15),
   material: matTrack,
 });
 world.addBody(pinBody);
 
 const tmpV = new THREE.Vector3();
-const tmpQ = new THREE.Quaternion();
+const yAxis = new THREE.Vector3(0, 1, 0);
+const zAxis = new THREE.Vector3(0, 0, 1);
 
 function syncPinBody() {
   tmpV.copy(pinLocal).applyQuaternion(trackQ);
@@ -218,30 +245,32 @@ function syncPinBody() {
 }
 
 const ballMesh = new THREE.Mesh(
-  new THREE.SphereGeometry(BALL_R, 28, 22),
-  new THREE.MeshStandardMaterial({ color: 0xc62828, roughness: 0.28 }),
+  new THREE.SphereGeometry(BALL_R, 32, 24),
+  new THREE.MeshStandardMaterial({
+    color: 0xc62828,
+    roughness: 0.14,
+    metalness: 0.18,
+  }),
 );
 ballMesh.castShadow = true;
 scene.add(ballMesh);
 
 const ballBody = new CANNON.Body({
-  mass: 0.85,
+  mass: 0.8,
   shape: new CANNON.Sphere(BALL_R),
   material: matBall,
-  linearDamping: 0.02,
-  angularDamping: 0.12,
+  linearDamping: 0.04,
+  angularDamping: 0.18,
 });
 world.addBody(ballBody);
 
 let yaw = 0;
 let tip = 0;
-let tipVel = 0;
 const yawQ = new THREE.Quaternion();
 const tipQ = new THREE.Quaternion();
 const trackQ = new THREE.Quaternion();
-const yAxis = new THREE.Vector3(0, 1, 0);
 
-const spawnLocal = new THREE.Vector3(-0.9, beamTop + BALL_R + 0.03, 0);
+const spawnLocal = new THREE.Vector3(X0 + 0.28, Y2 + BALL_R + 0.012, 0);
 
 const overlay = document.getElementById('overlay');
 const roastEl = document.getElementById('roast');
@@ -252,14 +281,17 @@ const overBest = document.getElementById('over-best');
 const replayBtn = document.getElementById('replay');
 
 let phase = 'idle';
-let charge = 0;
-let holding = false;
+let glued = true;
 let missTimer = 0;
 let score = 0;
 let best = 0;
 try { best = Number(localStorage.getItem(BEST_KEY) || 0) || 0; } catch (_) { /* */ }
 let hits = 0;
-let squash = 1;
+
+const keys = { yaw: 0, tip: 0 };
+let dragging = false;
+let lastPx = 0;
+let lastPy = 0;
 
 function setScoreHud() {
   scoreEl.textContent = String(score);
@@ -270,48 +302,15 @@ function hideHint() {
 }
 function showHint() {
   if (hintEl) {
-    hintEl.textContent = 'hold to charge';
+    hintEl.textContent = 'spin the 7';
     hintEl.classList.remove('hide');
   }
 }
 
 let audioCtx = null;
-let chargeOsc = null;
-let chargeGain = null;
 function ac() {
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   return audioCtx;
-}
-function startChargeTone() {
-  try {
-    const ctx = ac();
-    if (ctx.state === 'suspended') ctx.resume();
-    stopChargeTone();
-    chargeOsc = ctx.createOscillator();
-    chargeGain = ctx.createGain();
-    chargeOsc.type = 'sine';
-    chargeOsc.frequency.value = 220;
-    chargeGain.gain.value = 0.045;
-    chargeOsc.connect(chargeGain);
-    chargeGain.connect(ctx.destination);
-    chargeOsc.start();
-  } catch (_) { /* */ }
-}
-function updateChargeTone() {
-  if (!chargeOsc) return;
-  chargeOsc.frequency.value = 220 + charge * 420;
-  if (chargeGain) chargeGain.gain.value = 0.03 + charge * 0.04;
-}
-function stopChargeTone() {
-  try {
-    if (chargeOsc) {
-      chargeOsc.stop();
-      chargeOsc.disconnect();
-    }
-    if (chargeGain) chargeGain.disconnect();
-  } catch (_) { /* */ }
-  chargeOsc = null;
-  chargeGain = null;
 }
 function chirp(freq, dur, vol) {
   try {
@@ -382,14 +381,13 @@ function stepBurst(dt) {
 
 function applyTrackPose() {
   yawQ.setFromAxisAngle(yAxis, yaw);
-  tipQ.setFromAxisAngle(new THREE.Vector3(0, 0, 1), -tip);
+  tipQ.setFromAxisAngle(zAxis, -tip);
   trackQ.multiplyQuaternions(tipQ, yawQ);
   track.quaternion.copy(trackQ);
   trackBody.quaternion.set(trackQ.x, trackQ.y, trackQ.z, trackQ.w);
   trackBody.position.set(0, 0, 0);
   trackBody.angularVelocity.set(0, 0, 0);
   trackBody.velocity.set(0, 0, 0);
-  beamMesh.scale.set(1, squash, 1);
 }
 
 function seatBall() {
@@ -403,30 +401,24 @@ function seatBall() {
   ballMesh.quaternion.copy(ballBody.quaternion);
 }
 
-function layoutPin() {
-  const extra = Math.min(1.15, hits * 0.085);
-  pinLocal.copy(flareTip0);
-  pinLocal.x += extra;
-  pinLocal.y += 0.18 - extra * 0.04;
-  pin.position.copy(pinLocal);
-  const stretch = extra * 0.22;
-  for (let i = 0; i < 6; i++) {
-    const t = (i + 0.5) / 6;
-    const px = 1.72 + t * (1.35 + stretch);
-    const py = 0.12 - t * 0.08;
-    flareMeshes[i].position.set(px, py, 0);
-    flareOffsets[i].set(px, py, 0);
-  }
+function unglue() {
+  if (!glued || phase === 'dead') return;
+  glued = false;
+  hideHint();
+  applyTrackPose();
+  tmpV.copy(spawnLocal).applyQuaternion(trackQ);
+  ballBody.position.set(tmpV.x, tmpV.y, tmpV.z);
+  ballBody.velocity.set(0, 0, 0);
+  ballBody.angularVelocity.set(0, 0, 0);
+  ballBody.type = CANNON.Body.DYNAMIC;
+  ballBody.wakeUp();
+  if (phase === 'idle') phase = 'play';
 }
 
-function applyImpulse(amount) {
-  applyTrackPose();
-  const dir = new THREE.Vector3(1, 0.08, 0).applyQuaternion(trackQ).normalize();
-  const mag = 1.6 + amount * 7.4;
-  ballBody.applyImpulse(
-    new CANNON.Vec3(dir.x * mag, dir.y * mag, dir.z * mag),
-    ballBody.position,
-  );
+function layoutPin() {
+  const extra = Math.min(1.05, hits * 0.09);
+  pinLocal.set(flareTip0.x + extra, flareTip0.y - extra * 0.03, 0);
+  pin.position.copy(pinLocal);
 }
 
 function hideOverlay() {
@@ -448,12 +440,10 @@ function showMiss() {
 
 function resetRound() {
   phase = 'idle';
-  charge = 0;
-  holding = false;
+  glued = true;
   missTimer = 0;
   tip = 0;
-  tipVel = 0;
-  squash = 1;
+  yaw = 0;
   hideOverlay();
   pin.visible = true;
   ballMesh.visible = true;
@@ -472,61 +462,17 @@ function newGame() {
   resetRound();
 }
 
-function beginCharge() {
-  if (phase === 'dead') {
-    newGame();
-    return;
-  }
-  if (phase !== 'idle') return;
-  phase = 'charging';
-  charge = 0;
-  holding = true;
-  hideHint();
-  startChargeTone();
-}
-
-function releaseCharge() {
-  if (phase !== 'charging') {
-    holding = false;
-    return;
-  }
-  holding = false;
-  stopChargeTone();
-  const shot = charge;
-  charge = 0;
-  if (shot < 0.04) {
-    phase = 'idle';
-    tipVel = 0;
-    showHint();
-    return;
-  }
-  tipVel = 9 + shot * 10;
-  applyTrackPose();
-  seatBall();
-  ballBody.type = CANNON.Body.DYNAMIC;
-  ballBody.wakeUp();
-  applyImpulse(shot);
-  phase = 'flying';
-}
-
 function onPinHit() {
-  if (phase !== 'flying') return;
-  const spd = ballBody.velocity.length();
-  if (spd <= 0.5) return;
-  tmpV.copy(pinLocal).applyQuaternion(trackQ);
-  const dx = ballBody.position.x - tmpV.x;
-  const dz = ballBody.position.z - tmpV.z;
-  const radial = Math.hypot(dx, dz);
-  const combo = (spd > 4.2 || radial < 0.14) ? 2 : 1;
-  score += combo;
+  if (phase !== 'play') return;
+  score += 1;
   hits += 1;
   setScoreHud();
   fireBurst(ballBody.position);
-  chirp(combo === 2 ? 740 : 620, 0.16, 0.07);
+  chirp(660, 0.16, 0.07);
   pin.visible = false;
   layoutPin();
   phase = 'scored';
-  missTimer = 0.42;
+  missTimer = 0.45;
 }
 
 world.addEventListener('beginContact', (e) => {
@@ -538,24 +484,28 @@ world.addEventListener('beginContact', (e) => {
 
 newGame();
 
-function isChargeKey(e) {
-  return e.code === 'Space' || e.key === ' ';
+function bindKey(e, down) {
+  const k = e.key;
+  if (k === 'ArrowLeft' || k === 'a' || k === 'A') keys.yaw = down ? -1 : (keys.yaw === -1 ? 0 : keys.yaw);
+  if (k === 'ArrowRight' || k === 'd' || k === 'D') keys.yaw = down ? 1 : (keys.yaw === 1 ? 0 : keys.yaw);
+  if (k === 'ArrowUp' || k === 'w' || k === 'W') keys.tip = down ? 1 : (keys.tip === 1 ? 0 : keys.tip);
+  if (k === 'ArrowDown' || k === 's' || k === 'S') keys.tip = down ? -1 : (keys.tip === -1 ? 0 : keys.tip);
 }
 
 addEventListener('keydown', (e) => {
-  if (!isChargeKey(e)) return;
-  e.preventDefault();
-  if (e.repeat) return;
-  if (phase === 'dead') {
-    newGame();
-    return;
+  if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'a', 'A', 'd', 'D', 'w', 'W', 's', 'S'].includes(e.key)) {
+    e.preventDefault();
+    if (e.repeat) return;
+    if (phase === 'dead') {
+      newGame();
+      return;
+    }
+    bindKey(e, true);
+    unglue();
   }
-  beginCharge();
 });
 addEventListener('keyup', (e) => {
-  if (!isChargeKey(e)) return;
-  e.preventDefault();
-  releaseCharge();
+  bindKey(e, false);
 });
 
 canvas.addEventListener('pointerdown', (e) => {
@@ -565,13 +515,23 @@ canvas.addEventListener('pointerdown', (e) => {
     newGame();
     return;
   }
-  beginCharge();
+  dragging = true;
+  lastPx = e.clientX;
+  lastPy = e.clientY;
+  unglue();
 });
-canvas.addEventListener('pointerup', (e) => {
-  e.preventDefault();
-  releaseCharge();
+canvas.addEventListener('pointermove', (e) => {
+  if (!dragging) return;
+  const dx = e.clientX - lastPx;
+  const dy = e.clientY - lastPy;
+  lastPx = e.clientX;
+  lastPy = e.clientY;
+  yaw += dx * 0.008;
+  tip = THREE.MathUtils.clamp(tip - dy * 0.006, -TIP_MAX, TIP_MAX);
 });
-canvas.addEventListener('pointercancel', () => releaseCharge());
+canvas.addEventListener('pointerup', () => { dragging = false; });
+canvas.addEventListener('pointercancel', () => { dragging = false; });
+
 replayBtn.addEventListener('click', (e) => {
   e.preventDefault();
   newGame();
@@ -591,74 +551,44 @@ const clock = new THREE.Clock();
 function frame() {
   const dt = Math.min(clock.getDelta(), 1 / 30);
 
-  if (phase === 'charging' && holding) {
-    charge = Math.min(1, charge + dt / CHARGE_T);
-    tip = -WIND_MAX * charge;
-    squash = 1 - charge * 0.16;
-    tipVel = 0;
-    updateChargeTone();
-    applyTrackPose();
-    syncPinBody();
+  if (phase !== 'dead') {
+    yaw += keys.yaw * 1.7 * dt;
+    tip = THREE.MathUtils.clamp(tip + keys.tip * 1.15 * dt, -TIP_MAX, TIP_MAX);
+  }
+
+  applyTrackPose();
+  syncPinBody();
+
+  if (glued && phase !== 'dead') {
     seatBall();
-  } else if (phase === 'idle') {
-    tipVel += (0 - tip) * 28 * dt;
-    tipVel *= Math.exp(-10 * dt);
-    tip += tipVel * dt;
-    squash += (1 - squash) * Math.min(1, 14 * dt);
-    applyTrackPose();
-    syncPinBody();
-    seatBall();
-  } else if (phase === 'flying' || phase === 'falling') {
-    const want = SNAP_MAX * Math.max(0, tipVel > 0 ? 1 : 0) * 0;
-    tipVel += ((-want) - tip) * 42 * dt;
-    tipVel *= Math.exp(-6 * dt);
-    tip += tipVel * dt;
-    if (tip > SNAP_MAX) {
-      tip = SNAP_MAX;
-      tipVel *= -0.35;
-    }
-    squash += (1 - squash) * Math.min(1, 16 * dt);
-    applyTrackPose();
-    syncPinBody();
+  } else if (phase === 'play' || phase === 'falling' || phase === 'scored') {
     world.step(1 / 60, dt, 3);
     ballMesh.position.copy(ballBody.position);
     ballMesh.quaternion.copy(ballBody.quaternion);
-    if (phase === 'flying' && ballBody.position.y < -6) {
-      phase = 'falling';
-      missTimer = 0.8;
+
+    if (phase === 'play') {
+      const p = ballBody.position;
+      if (p.y < -5.5 || Math.hypot(p.x, p.z) > 8) {
+        phase = 'falling';
+        missTimer = 0.55;
+      }
     }
-  } else if (phase === 'scored') {
-    tipVel += (0 - tip) * 20 * dt;
-    tipVel *= Math.exp(-8 * dt);
-    tip += tipVel * dt;
-    squash += (1 - squash) * Math.min(1, 16 * dt);
-    applyTrackPose();
-    syncPinBody();
-    world.step(1 / 60, dt, 3);
-    ballMesh.position.copy(ballBody.position);
-    ballMesh.quaternion.copy(ballBody.quaternion);
-    missTimer -= dt;
-    if (missTimer <= 0) {
-      pin.visible = true;
-      resetRound();
+    if (phase === 'scored') {
+      missTimer -= dt;
+      if (missTimer <= 0) {
+        pin.visible = true;
+        resetRound();
+      }
+    } else if (phase === 'falling') {
+      missTimer -= dt;
+      if (missTimer <= 0) showMiss();
     }
-  } else if (phase === 'falling') {
-    applyTrackPose();
-    syncPinBody();
-    world.step(1 / 60, dt, 3);
-    ballMesh.position.copy(ballBody.position);
-    ballMesh.quaternion.copy(ballBody.quaternion);
-    missTimer -= dt;
-    if (missTimer <= 0) showMiss();
-  } else {
-    applyTrackPose();
-    syncPinBody();
   }
 
   tmpV.copy(pinLocal).applyQuaternion(trackQ);
   lookNow.lerp(new THREE.Vector3(
-    lookHome.x + tmpV.x * 0.12,
-    lookHome.y + tmpV.y * 0.08,
+    lookHome.x + tmpV.x * 0.1,
+    lookHome.y + tmpV.y * 0.06,
     lookHome.z,
   ), 1 - Math.exp(-2.2 * dt));
   camera.position.copy(camHome);
