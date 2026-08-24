@@ -7,7 +7,7 @@ const BALL_R = 0.2;
 const ROTATE = 1.15;
 const TIP_RATE = 1.05;
 const TIP_MAX = (25 * Math.PI) / 180;
-const TIP_DEFAULT = (8 * Math.PI) / 180;
+const TIP_DEFAULT = 0;
 const WALL_H = 0.28;
 const WALL_T = 0.08;
 
@@ -178,9 +178,26 @@ const pin = new THREE.Mesh(
 pin.castShadow = true;
 pin.scale.setScalar(0.55);
 pin.position.copy(flareTip);
-pin.position.y += 0.1;
+pin.position.y += 0.18;
 track.add(pin);
 world.addBody(trackBody);
+
+const pinLocal = pin.position.clone();
+const pinBody = new CANNON.Body({
+  type: CANNON.Body.KINEMATIC,
+  mass: 0,
+  shape: new CANNON.Sphere(0.16),
+  material: matTrack,
+});
+world.addBody(pinBody);
+
+function syncPinBody() {
+  tmpV.copy(pinLocal).applyQuaternion(trackQ);
+  pinBody.position.set(tmpV.x, tmpV.y, tmpV.z);
+  pinBody.quaternion.set(trackQ.x, trackQ.y, trackQ.z, trackQ.w);
+  pinBody.velocity.set(0, 0, 0);
+  pinBody.angularVelocity.set(0, 0, 0);
+}
 
 const ballMesh = new THREE.Mesh(
   new THREE.SphereGeometry(BALL_R, 28, 22),
@@ -210,11 +227,103 @@ camRight.setFromMatrixColumn(camera.matrixWorld, 0).normalize();
 
 // Spawn on the top beam, a bit left of center
 const spawnLocal = new THREE.Vector3(
-  -0.55,
+  -1.25,
   beamTop + BALL_R + 0.03,
   0,
 );
 const tmpV = new THREE.Vector3();
+
+const overlay = document.getElementById('overlay');
+const overlayTitle = overlay.querySelector('h2');
+const replayBtn = document.getElementById('replay');
+const hintEl = document.getElementById('hint');
+
+let phase = 'play';
+let missTimer = 0;
+let steered = false;
+let dinged = false;
+
+function hideHint() {
+  if (steered) return;
+  steered = true;
+  if (hintEl) hintEl.classList.add('hide');
+}
+
+function ding() {
+  try {
+    const ac = new (window.AudioContext || window.webkitAudioContext)();
+    const o = ac.createOscillator();
+    const g = ac.createGain();
+    o.type = 'sine';
+    o.frequency.value = 880;
+    g.gain.value = 0.06;
+    o.connect(g);
+    g.connect(ac.destination);
+    o.start();
+    g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + 0.18);
+    o.stop(ac.currentTime + 0.2);
+  } catch (_) { /* autoplay / missing Audio */ }
+}
+
+const burstGeom = new THREE.BufferGeometry();
+const BURST_N = 48;
+const burstPos = new Float32Array(BURST_N * 3);
+const burstCol = new Float32Array(BURST_N * 3);
+const burstVel = [];
+for (let i = 0; i < BURST_N; i++) {
+  burstVel.push(new THREE.Vector3());
+  if (i % 2 === 0) {
+    burstCol[i * 3] = 0.78; burstCol[i * 3 + 1] = 0.16; burstCol[i * 3 + 2] = 0.16;
+  } else {
+    burstCol[i * 3] = 0.96; burstCol[i * 3 + 1] = 0.96; burstCol[i * 3 + 2] = 0.94;
+  }
+}
+burstGeom.setAttribute('position', new THREE.BufferAttribute(burstPos, 3));
+burstGeom.setAttribute('color', new THREE.BufferAttribute(burstCol, 3));
+const burstPts = new THREE.Points(
+  burstGeom,
+  new THREE.PointsMaterial({ size: 0.12, vertexColors: true, transparent: true, opacity: 0, depthWrite: false }),
+);
+burstPts.visible = false;
+scene.add(burstPts);
+let burstAge = 0;
+
+function fireBurst(at) {
+  for (let i = 0; i < BURST_N; i++) {
+    burstPos[i * 3] = at.x;
+    burstPos[i * 3 + 1] = at.y;
+    burstPos[i * 3 + 2] = at.z;
+    burstVel[i].set(Math.random() - 0.5, Math.random() * 0.7 + 0.15, Math.random() - 0.5).multiplyScalar(4.2);
+  }
+  burstGeom.attributes.position.needsUpdate = true;
+  burstPts.material.opacity = 1;
+  burstPts.visible = true;
+  burstAge = 0.9;
+}
+
+function stepBurst(dt) {
+  if (!burstPts.visible) return;
+  burstAge -= dt;
+  for (let i = 0; i < BURST_N; i++) {
+    burstVel[i].y -= 6 * dt;
+    burstPos[i * 3] += burstVel[i].x * dt;
+    burstPos[i * 3 + 1] += burstVel[i].y * dt;
+    burstPos[i * 3 + 2] += burstVel[i].z * dt;
+  }
+  burstGeom.attributes.position.needsUpdate = true;
+  burstPts.material.opacity = Math.max(0, burstAge / 0.9);
+  if (burstAge <= 0) burstPts.visible = false;
+}
+
+function showOverlay(kind) {
+  overlayTitle.textContent = kind === 'win' ? 'PIN' : 'MISS';
+  overlay.classList.toggle('miss', kind !== 'win');
+  overlay.classList.add('show');
+}
+
+function hideOverlay() {
+  overlay.classList.remove('show', 'miss');
+}
 
 function applyTrackPose() {
   yawQ.setFromAxisAngle(yAxis, yaw);
@@ -228,16 +337,46 @@ function applyTrackPose() {
 }
 
 function reset() {
+  phase = 'play';
+  missTimer = 0;
+  dinged = false;
+  hideOverlay();
+  pin.visible = true;
+  ballMesh.visible = true;
+  burstPts.visible = false;
   yaw = 0;
   tip = TIP_DEFAULT;
   applyTrackPose();
+  syncPinBody();
   tmpV.copy(spawnLocal).applyQuaternion(trackQ);
   ballBody.position.set(tmpV.x, tmpV.y, tmpV.z);
-  const nudge = new THREE.Vector3(0.5, 0, 0).applyQuaternion(trackQ);
-  ballBody.velocity.set(nudge.x, nudge.y, nudge.z);
+  ballBody.velocity.set(0, 0, 0);
   ballBody.angularVelocity.set(0, 0, 0);
   ballBody.quaternion.set(0, 0, 0, 1);
 }
+
+function win() {
+  if (phase !== 'play') return;
+  phase = 'win';
+  pin.visible = false;
+  ballMesh.visible = false;
+  fireBurst(ballBody.position);
+  showOverlay('win');
+}
+
+function fail() {
+  if (phase !== 'play') return;
+  phase = 'miss';
+  missTimer = 0.85;
+  showOverlay('miss');
+}
+
+world.addEventListener('beginContact', (e) => {
+  const pair = (e.bodyA === ballBody && e.bodyB === pinBody)
+    || (e.bodyA === pinBody && e.bodyB === ballBody);
+  if (!pair) return;
+  if (ballBody.velocity.length() > 0.8) win();
+});
 
 reset();
 
@@ -247,22 +386,23 @@ const keys = new Set();
 addEventListener('keydown', (e) => {
   keys.add(e.code);
   if (e.code === 'KeyR') reset();
+  if (['KeyA', 'KeyD', 'KeyW', 'KeyS', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.code)) hideHint();
 });
 addEventListener('keyup', (e) => keys.delete(e.code));
 
 document.getElementById('left').addEventListener('pointerdown', (e) => {
-  e.preventDefault(); holdYaw = 1;
+  e.preventDefault(); holdYaw = 1; hideHint();
 });
 document.getElementById('right').addEventListener('pointerdown', (e) => {
-  e.preventDefault(); holdYaw = -1;
+  e.preventDefault(); holdYaw = -1; hideHint();
 });
 const tipUp = document.getElementById('tipup');
 const tipDown = document.getElementById('tipdown');
 if (tipUp) {
-  tipUp.addEventListener('pointerdown', (e) => { e.preventDefault(); holdTip = 1; });
+  tipUp.addEventListener('pointerdown', (e) => { e.preventDefault(); holdTip = 1; hideHint(); });
 }
 if (tipDown) {
-  tipDown.addEventListener('pointerdown', (e) => { e.preventDefault(); holdTip = -1; });
+  tipDown.addEventListener('pointerdown', (e) => { e.preventDefault(); holdTip = -1; hideHint(); });
 }
 addEventListener('pointerup', () => { holdYaw = 0; holdTip = 0; });
 addEventListener('pointercancel', () => { holdYaw = 0; holdTip = 0; });
@@ -278,6 +418,7 @@ canvas.addEventListener('pointerdown', (e) => {
   lastX = e.clientX;
   lastY = e.clientY;
   canvas.setPointerCapture(e.pointerId);
+  hideHint();
 });
 canvas.addEventListener('pointermove', (e) => {
   if (!dragging) return;
@@ -298,26 +439,41 @@ addEventListener('resize', () => {
 const clock = new THREE.Clock();
 function frame() {
   const dt = Math.min(clock.getDelta(), 1 / 30);
-  let spin = holdYaw;
-  if (keys.has('KeyA') || keys.has('ArrowLeft')) spin = 1;
-  if (keys.has('KeyD') || keys.has('ArrowRight')) spin = -1;
-  yaw += spin * ROTATE * dt;
 
-  let tilt = holdTip;
-  if (keys.has('KeyW') || keys.has('ArrowUp')) tilt = 1;
-  if (keys.has('KeyS') || keys.has('ArrowDown')) tilt = -1;
-  tip += tilt * TIP_RATE * dt;
-  tip = Math.max(-TIP_MAX, Math.min(TIP_MAX, tip));
+  if (phase === 'play') {
+    let spin = holdYaw;
+    if (keys.has('KeyA') || keys.has('ArrowLeft')) spin = 1;
+    if (keys.has('KeyD') || keys.has('ArrowRight')) spin = -1;
+    yaw += spin * ROTATE * dt;
 
-  applyTrackPose();
+    let tilt = holdTip;
+    if (keys.has('KeyW') || keys.has('ArrowUp')) tilt = 1;
+    if (keys.has('KeyS') || keys.has('ArrowDown')) tilt = -1;
+    tip += tilt * TIP_RATE * dt;
+    tip = Math.max(-TIP_MAX, Math.min(TIP_MAX, tip));
 
-  world.step(1 / 60, dt, 3);
+    applyTrackPose();
+    syncPinBody();
+    world.step(1 / 60, dt, 3);
 
-  ballMesh.position.copy(ballBody.position);
-  ballMesh.quaternion.copy(ballBody.quaternion);
+    ballMesh.position.copy(ballBody.position);
+    ballMesh.quaternion.copy(ballBody.quaternion);
 
-  if (ballBody.position.y < -8) reset();
+    const spd = ballBody.velocity.length();
+    if (!dinged && spd > 0.35) {
+      dinged = true;
+      ding();
+    }
+    if (ballBody.position.y < -6) fail();
+  } else if (phase === 'miss') {
+    missTimer -= dt;
+    if (missTimer <= 0) reset();
+  } else {
+    applyTrackPose();
+    syncPinBody();
+  }
 
+  stepBurst(dt);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }

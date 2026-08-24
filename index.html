@@ -18,6 +18,13 @@
         margin: 0; font-weight: 400; letter-spacing: 0.42em;
         font-size: 13px; color: #3a3828;
       }
+      #hint {
+        position: absolute; top: 36px; left: 50%; transform: translateX(-50%);
+        margin: 0; font-size: 11px; letter-spacing: 0.22em; color: #3a3828;
+        opacity: 0.65;
+      }
+      #hint.hide { display: none; }
+      #overlay.miss #replay { display: none; }
       .controls {
         position: absolute; bottom: 20px; left: 0; right: 0;
         display: flex; justify-content: center; align-items: center; gap: 28px;
@@ -45,6 +52,7 @@
   <body>
     <div id="ui">
       <h1>PINROSE</h1>
+      <p id="hint">drag to steer</p>
       <div class="controls">
         <button id="tipdown" type="button" aria-label="tip down">&#9660;</button>
         <button id="left" type="button" aria-label="rotate left">&#9664;</button>
