@@ -56,13 +56,42 @@
         font-size: 13px; letter-spacing: 0.28em; cursor: pointer;
         pointer-events: auto;
       }
+      #start {
+        display: none; position: absolute; inset: 0;
+        align-items: center; justify-content: center;
+        flex-direction: column; pointer-events: auto;
+        background: rgba(201, 201, 165, 0.86);
+        text-align: center;
+      }
+      #start.show { display: flex; }
+      #start h1 {
+        margin: 0 0 22px; font-weight: 600; letter-spacing: 0.48em;
+        font-size: 28px; color: #2e2c20;
+      }
+      #start .line {
+        margin: 0 0 8px; font-size: 16px; font-weight: 500;
+        color: #2e2c20; letter-spacing: 0.02em; max-width: 86vw;
+      }
+      #start .line.sub { margin-bottom: 36px; opacity: 0.72; font-size: 15px; }
+      #start-btn {
+        appearance: none; background: #2e2c20; color: #f3f0d8;
+        border: 0; padding: 22px 72px; border-radius: 999px;
+        font-size: 20px; font-weight: 700; letter-spacing: 0.32em;
+        cursor: pointer; pointer-events: auto;
+      }
     </style>
   </head>
   <body>
     <div id="ui">
       <p id="brand">PINROSE</p>
       <p id="score">0</p>
-      <p id="hint">spin the 7</p>
+      <p id="hint" class="hide">drag to spin</p>
+      <div id="start" class="show">
+        <h1>PINROSE</h1>
+        <p class="line">Get the red ball to the white pin</p>
+        <p class="line sub">Drag the yellow 7 to roll it</p>
+        <button id="start-btn" type="button">START</button>
+      </div>
       <div id="overlay">
         <h2 id="roast">MISS</h2>
         <div id="over-score">0</div>

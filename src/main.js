@@ -217,6 +217,22 @@ for (const hy of [0.72, 0.80]) {
   ring.position.y = hy;
   pin.add(ring);
 }
+const goalMat = new THREE.MeshStandardMaterial({
+  color: 0xf4f4f0,
+  roughness: 0.28,
+  emissive: 0xffffff,
+  emissiveIntensity: 0.22,
+});
+const goalMark = new THREE.Group();
+const goalRing = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.016, 8, 28), goalMat);
+goalRing.rotation.x = Math.PI / 2;
+const goalArrow = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.2, 8), goalMat);
+goalArrow.rotation.x = Math.PI;
+goalArrow.position.y = 0.34;
+goalMark.add(goalRing);
+goalMark.add(goalArrow);
+goalMark.position.y = 1.18;
+pin.add(goalMark);
 track.add(pin);
 world.addBody(trackBody);
 
@@ -273,6 +289,8 @@ const trackQ = new THREE.Quaternion();
 const spawnLocal = new THREE.Vector3(X0 + 0.28, Y2 + BALL_R + 0.012, 0);
 
 const overlay = document.getElementById('overlay');
+const startEl = document.getElementById('start');
+const startBtn = document.getElementById('start-btn');
 const roastEl = document.getElementById('roast');
 const scoreEl = document.getElementById('score');
 const hintEl = document.getElementById('hint');
@@ -280,7 +298,8 @@ const overScore = document.getElementById('over-score');
 const overBest = document.getElementById('over-best');
 const replayBtn = document.getElementById('replay');
 
-let phase = 'idle';
+let started = false;
+let phase = 'menu';
 let glued = true;
 let missTimer = 0;
 let score = 0;
@@ -302,9 +321,18 @@ function hideHint() {
 }
 function showHint() {
   if (hintEl) {
-    hintEl.textContent = 'spin the 7';
+    hintEl.textContent = 'drag to spin';
     hintEl.classList.remove('hide');
   }
+}
+
+function beginPlay() {
+  if (started) return;
+  started = true;
+  if (startEl) startEl.classList.remove('show');
+  phase = 'idle';
+  glued = true;
+  showHint();
 }
 
 let audioCtx = null;
@@ -402,7 +430,7 @@ function seatBall() {
 }
 
 function unglue() {
-  if (!glued || phase === 'dead') return;
+  if (!started || !glued || phase === 'dead' || phase === 'menu') return;
   glued = false;
   hideHint();
   applyTrackPose();
@@ -446,11 +474,13 @@ function resetRound() {
   yaw = 0;
   hideOverlay();
   pin.visible = true;
+  if (goalMark) goalMark.visible = true;
   ballMesh.visible = true;
   applyTrackPose();
   syncPinBody();
   seatBall();
-  showHint();
+  if (started) showHint();
+  else hideHint();
 }
 
 function newGame() {
@@ -470,6 +500,7 @@ function onPinHit() {
   fireBurst(ballBody.position);
   chirp(660, 0.16, 0.07);
   pin.visible = false;
+  if (goalMark) goalMark.visible = false;
   layoutPin();
   phase = 'scored';
   missTimer = 0.45;
@@ -483,6 +514,10 @@ world.addEventListener('beginContact', (e) => {
 });
 
 newGame();
+phase = 'menu';
+started = false;
+hideHint();
+if (startEl) startEl.classList.add('show');
 
 function bindKey(e, down) {
   const k = e.key;
@@ -493,14 +528,25 @@ function bindKey(e, down) {
 }
 
 addEventListener('keydown', (e) => {
+  if (e.code === 'Space' || e.key === ' ') {
+    e.preventDefault();
+    if (!started) {
+      beginPlay();
+      return;
+    }
+    if (phase === 'dead') newGame();
+    return;
+  }
   if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'a', 'A', 'd', 'D', 'w', 'W', 's', 'S'].includes(e.key)) {
     e.preventDefault();
     if (e.repeat) return;
+    if (!started) return;
     if (phase === 'dead') {
       newGame();
       return;
     }
     bindKey(e, true);
+    hideHint();
     unglue();
   }
 });
@@ -511,6 +557,7 @@ addEventListener('keyup', (e) => {
 canvas.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   canvas.setPointerCapture(e.pointerId);
+  if (!started) return;
   if (phase === 'dead') {
     newGame();
     return;
@@ -518,6 +565,7 @@ canvas.addEventListener('pointerdown', (e) => {
   dragging = true;
   lastPx = e.clientX;
   lastPy = e.clientY;
+  hideHint();
   unglue();
 });
 canvas.addEventListener('pointermove', (e) => {
@@ -541,6 +589,12 @@ overlay.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   newGame();
 });
+function onStartTap(e) {
+  e.preventDefault();
+  beginPlay();
+}
+startBtn.addEventListener('click', onStartTap);
+startEl.addEventListener('pointerdown', onStartTap);
 
 addEventListener('resize', () => {
   fitCamera();
@@ -551,7 +605,7 @@ const clock = new THREE.Clock();
 function frame() {
   const dt = Math.min(clock.getDelta(), 1 / 30);
 
-  if (phase !== 'dead') {
+  if (started && phase !== 'dead' && phase !== 'menu') {
     yaw += keys.yaw * 1.7 * dt;
     tip = THREE.MathUtils.clamp(tip + keys.tip * 1.15 * dt, -TIP_MAX, TIP_MAX);
   }
@@ -559,7 +613,14 @@ function frame() {
   applyTrackPose();
   syncPinBody();
 
-  if (glued && phase !== 'dead') {
+  if (goalMark.visible) {
+    const pulse = Math.sin(performance.now() * 0.004);
+    goalMark.position.y = 1.18 + pulse * 0.08;
+    const s = 1 + pulse * 0.12;
+    goalRing.scale.set(s, s, s);
+  }
+
+  if ((glued || !started) && phase !== 'dead') {
     seatBall();
   } else if (phase === 'play' || phase === 'falling' || phase === 'scored') {
     world.step(1 / 60, dt, 3);
