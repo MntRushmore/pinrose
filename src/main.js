@@ -7,6 +7,9 @@ const BALL_R = 0.2;
 const ROTATE = 1.15;
 const TIP_RATE = 1.05;
 const TIP_MAX = (25 * Math.PI) / 180;
+const TIP_DEFAULT = (8 * Math.PI) / 180;
+const WALL_H = 0.28;
+const WALL_T = 0.08;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(VOID);
@@ -46,31 +49,27 @@ sun.castShadow = true;
 sun.shadow.mapSize.set(1024, 1024);
 scene.add(sun);
 
-const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -14, 0) });
+const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -11, 0) });
 world.broadphase = new CANNON.SAPBroadphase(world);
 world.allowSleep = false;
 
 const matTrack = new CANNON.Material('track');
 const matBall = new CANNON.Material('ball');
 world.addContactMaterial(new CANNON.ContactMaterial(matTrack, matBall, {
-  friction: 0.35,
-  restitution: 0.02,
+  friction: 0.25,
+  restitution: 0,
 }));
 
 // Inverted-7 pieces: [sx, sy, sz, px, py, pz]
 const BEAM = [3.4, 0.22, 0.78, 0, 1.72, 0];
+const PILLAR = [0.24, 1.55, 0.78, 1.58, 0.835, 0];
 const parts = [
   BEAM,
-  [0.24, 1.55, 0.78, 1.58, 0.835, 0], // right pillar
+  PILLAR,
 ];
-// 6-slab left pipe (down-left from beam)
-const leftPipe = [];
-for (let i = 0; i < 6; i++) {
-  const t = (i + 0.5) / 6;
-  const slab = [0.42, 0.2, 0.72, -1.55 - t * 0.55, 1.55 - t * 1.85, 0];
-  parts.push(slab);
-  leftPipe.push(slab);
-}
+const beamTop = BEAM[4] + BEAM[1] / 2;
+const bumperH = 0.52;
+parts.push([0.18, bumperH, 0.78, -BEAM[0] / 2 + 0.06, beamTop + bumperH / 2, 0]);
 // 6-slab bottom-right flare
 const flareAnchors = [];
 for (let i = 0; i < 6; i++) {
@@ -102,7 +101,68 @@ for (const [sx, sy, sz, px, py, pz] of parts) {
   const shape = new CANNON.Box(new CANNON.Vec3(sx / 2, sy / 2, sz / 2));
   trackBody.addShape(shape, new CANNON.Vec3(px, py, pz));
 }
-world.addBody(trackBody);
+function addYellowBox(sx, sy, sz, px, py, pz) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), yellowMat);
+  mesh.position.set(px, py, pz);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  track.add(mesh);
+  trackBody.addShape(
+    new CANNON.Box(new CANNON.Vec3(sx / 2, sy / 2, sz / 2)),
+    new CANNON.Vec3(px, py, pz),
+  );
+}
+function addYellowBoxRot(sx, sy, sz, px, py, pz, rotZ) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), yellowMat);
+  mesh.position.set(px, py, pz);
+  mesh.rotation.z = rotZ;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  track.add(mesh);
+  const q = new CANNON.Quaternion();
+  q.setFromAxisAngle(new CANNON.Vec3(0, 0, 1), rotZ);
+  trackBody.addShape(
+    new CANNON.Box(new CANNON.Vec3(sx / 2, sy / 2, sz / 2)),
+    new CANNON.Vec3(px, py, pz),
+    q,
+  );
+}
+const zEdge = BEAM[2] / 2;
+const pillarBot = PILLAR[4] - PILLAR[1] / 2;
+const pillarOuterX = PILLAR[3] + PILLAR[0] / 2;
+const wallTop = beamTop + WALL_H;
+const QN = 6;
+const QR = 0.95;
+const QZ = BEAM[2] - 0.06;
+const qcx = pillarOuterX + 0.28;
+const qcy = beamTop;
+for (const z of [zEdge, -zEdge]) {
+  // Beam gutter walls
+  addYellowBox(BEAM[0], WALL_H, WALL_T, BEAM[3], beamTop + WALL_H / 2, z);
+  // Continue down the pillar so the corner is a boxed chute
+  const sy = wallTop - pillarBot;
+  const wallSx = qcx - (PILLAR[3] - PILLAR[0] / 2) + 0.10;
+  addYellowBox(wallSx, sy, WALL_T, PILLAR[3] - PILLAR[0] / 2 + wallSx / 2, pillarBot + sy / 2, z);
+}
+// Quarter-pipe starts on the beam so the ball is already turning at the elbow.
+const QTH = 0.16;
+for (let i = 0; i < QN; i++) {
+  const th = (i / (QN - 1)) * (Math.PI / 2);
+  const surfX = qcx - QR * Math.cos(th);
+  const surfY = qcy - QR * Math.sin(th);
+  let sx = 0.42;
+  let px = surfX + (QTH / 2) * Math.sin(th);
+  let py = surfY - (QTH / 2) * Math.cos(th);
+  if (i === QN - 1) {
+    sx = surfY - pillarBot + 0.12;
+    px = qcx + QTH / 2;
+    py = (surfY + pillarBot) / 2;
+  }
+  addYellowBoxRot(sx, QTH, QZ, px, py, 0, th);
+}
+// Tiny 0.08 curb on the outer +X of the pipe (replaces the tall beam-end lip)
+const lipH = 0.08;
+addYellowBox(WALL_T, lipH, BEAM[2] - WALL_T, qcx + QTH + WALL_T / 2, beamTop + lipH / 2, 0);
 
 // White lathe pin glued to flare (child of track)
 const pinPts = [];
@@ -120,6 +180,7 @@ pin.scale.setScalar(0.55);
 pin.position.copy(flareTip);
 pin.position.y += 0.1;
 track.add(pin);
+world.addBody(trackBody);
 
 const ballMesh = new THREE.Mesh(
   new THREE.SphereGeometry(BALL_R, 28, 22),
@@ -132,7 +193,7 @@ const ballBody = new CANNON.Body({
   mass: 0.85,
   shape: new CANNON.Sphere(BALL_R),
   material: matBall,
-  linearDamping: 0.04,
+  linearDamping: 0.02,
   angularDamping: 0.12,
 });
 world.addBody(ballBody);
@@ -147,18 +208,17 @@ const camRight = new THREE.Vector3();
 camera.getWorldDirection(new THREE.Vector3());
 camRight.setFromMatrixColumn(camera.matrixWorld, 0).normalize();
 
-// Spawn on the first left-pipe slab (lip / top of the quarter-pipe)
-const lip = leftPipe[0];
+// Spawn on the top beam, a bit left of center
 const spawnLocal = new THREE.Vector3(
-  lip[3],
-  lip[4] + lip[1] * 0.5 + BALL_R + 0.04,
+  -0.55,
+  beamTop + BALL_R + 0.03,
   0,
 );
 const tmpV = new THREE.Vector3();
 
 function applyTrackPose() {
   yawQ.setFromAxisAngle(yAxis, yaw);
-  tipQ.setFromAxisAngle(camRight, tip);
+  tipQ.setFromAxisAngle(new THREE.Vector3(0, 0, 1), -tip);
   trackQ.multiplyQuaternions(tipQ, yawQ);
   track.quaternion.copy(trackQ);
   trackBody.quaternion.set(trackQ.x, trackQ.y, trackQ.z, trackQ.w);
@@ -169,11 +229,12 @@ function applyTrackPose() {
 
 function reset() {
   yaw = 0;
-  tip = 0;
+  tip = TIP_DEFAULT;
   applyTrackPose();
   tmpV.copy(spawnLocal).applyQuaternion(trackQ);
   ballBody.position.set(tmpV.x, tmpV.y, tmpV.z);
-  ballBody.velocity.set(0, 0, 0);
+  const nudge = new THREE.Vector3(0.5, 0, 0).applyQuaternion(trackQ);
+  ballBody.velocity.set(nudge.x, nudge.y, nudge.z);
   ballBody.angularVelocity.set(0, 0, 0);
   ballBody.quaternion.set(0, 0, 0, 1);
 }
