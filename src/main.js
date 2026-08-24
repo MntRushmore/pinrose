@@ -5,6 +5,8 @@ const VOID = 0xc9c9a5;
 const YELLOW = 0xf5d13a;
 const BALL_R = 0.2;
 const ROTATE = 1.15;
+const TIP_RATE = 1.05;
+const TIP_MAX = (25 * Math.PI) / 180;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(VOID);
@@ -21,6 +23,7 @@ function fitCamera() {
 }
 camera.position.set(14, 11.2, 14);
 camera.lookAt(0, 0.4, 0);
+camera.updateMatrixWorld();
 fitCamera();
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -50,21 +53,23 @@ world.allowSleep = false;
 const matTrack = new CANNON.Material('track');
 const matBall = new CANNON.Material('ball');
 world.addContactMaterial(new CANNON.ContactMaterial(matTrack, matBall, {
-  friction: 0.55,
+  friction: 0.35,
   restitution: 0.02,
 }));
 
 // Inverted-7 pieces: [sx, sy, sz, px, py, pz]
 const BEAM = [3.4, 0.22, 0.78, 0, 1.72, 0];
-const beamTop = BEAM[4] + BEAM[1] * 0.5;
 const parts = [
   BEAM,
   [0.24, 1.55, 0.78, 1.58, 0.835, 0], // right pillar
 ];
 // 6-slab left pipe (down-left from beam)
+const leftPipe = [];
 for (let i = 0; i < 6; i++) {
   const t = (i + 0.5) / 6;
-  parts.push([0.42, 0.2, 0.72, -1.55 - t * 0.55, 1.55 - t * 1.85, 0]);
+  const slab = [0.42, 0.2, 0.72, -1.55 - t * 0.55, 1.55 - t * 1.85, 0];
+  parts.push(slab);
+  leftPipe.push(slab);
 }
 // 6-slab bottom-right flare
 const flareAnchors = [];
@@ -99,7 +104,7 @@ for (const [sx, sy, sz, px, py, pz] of parts) {
 }
 world.addBody(trackBody);
 
-// White lathe pin glued to flare (visual only)
+// White lathe pin glued to flare (child of track)
 const pinPts = [];
 const pinProfile = [
   [0.00, 0.00], [0.16, 0.02], [0.18, 0.12], [0.12, 0.28],
@@ -112,6 +117,8 @@ const pin = new THREE.Mesh(
 );
 pin.castShadow = true;
 pin.scale.setScalar(0.55);
+pin.position.copy(flareTip);
+pin.position.y += 0.1;
 track.add(pin);
 
 const ballMesh = new THREE.Mesh(
@@ -125,26 +132,46 @@ const ballBody = new CANNON.Body({
   mass: 0.85,
   shape: new CANNON.Sphere(BALL_R),
   material: matBall,
-  linearDamping: 0.12,
-  angularDamping: 0.18,
+  linearDamping: 0.04,
+  angularDamping: 0.12,
 });
 world.addBody(ballBody);
 
 let yaw = 0;
+let tip = 0;
 const yawQ = new THREE.Quaternion();
+const tipQ = new THREE.Quaternion();
+const trackQ = new THREE.Quaternion();
 const yAxis = new THREE.Vector3(0, 1, 0);
-const spawnLocal = new THREE.Vector3(-0.2, beamTop + BALL_R + 0.03, 0);
+const camRight = new THREE.Vector3();
+camera.getWorldDirection(new THREE.Vector3());
+camRight.setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+
+// Spawn on the first left-pipe slab (lip / top of the quarter-pipe)
+const lip = leftPipe[0];
+const spawnLocal = new THREE.Vector3(
+  lip[3],
+  lip[4] + lip[1] * 0.5 + BALL_R + 0.04,
+  0,
+);
 const tmpV = new THREE.Vector3();
-const tmpQ = new THREE.Quaternion();
+
+function applyTrackPose() {
+  yawQ.setFromAxisAngle(yAxis, yaw);
+  tipQ.setFromAxisAngle(camRight, tip);
+  trackQ.multiplyQuaternions(tipQ, yawQ);
+  track.quaternion.copy(trackQ);
+  trackBody.quaternion.set(trackQ.x, trackQ.y, trackQ.z, trackQ.w);
+  trackBody.position.set(0, 0, 0);
+  trackBody.angularVelocity.set(0, 0, 0);
+  trackBody.velocity.set(0, 0, 0);
+}
 
 function reset() {
   yaw = 0;
-  yawQ.setFromAxisAngle(yAxis, yaw);
-  track.quaternion.copy(yawQ);
-  trackBody.quaternion.set(yawQ.x, yawQ.y, yawQ.z, yawQ.w);
-  trackBody.angularVelocity.set(0, 0, 0);
-  trackBody.velocity.set(0, 0, 0);
-  tmpV.copy(spawnLocal).applyQuaternion(yawQ);
+  tip = 0;
+  applyTrackPose();
+  tmpV.copy(spawnLocal).applyQuaternion(trackQ);
   ballBody.position.set(tmpV.x, tmpV.y, tmpV.z);
   ballBody.velocity.set(0, 0, 0);
   ballBody.angularVelocity.set(0, 0, 0);
@@ -153,7 +180,8 @@ function reset() {
 
 reset();
 
-let hold = 0;
+let holdYaw = 0;
+let holdTip = 0;
 const keys = new Set();
 addEventListener('keydown', (e) => {
   keys.add(e.code);
@@ -162,28 +190,41 @@ addEventListener('keydown', (e) => {
 addEventListener('keyup', (e) => keys.delete(e.code));
 
 document.getElementById('left').addEventListener('pointerdown', (e) => {
-  e.preventDefault(); hold = 1;
+  e.preventDefault(); holdYaw = 1;
 });
 document.getElementById('right').addEventListener('pointerdown', (e) => {
-  e.preventDefault(); hold = -1;
+  e.preventDefault(); holdYaw = -1;
 });
-addEventListener('pointerup', () => { hold = 0; });
-addEventListener('pointercancel', () => { hold = 0; });
+const tipUp = document.getElementById('tipup');
+const tipDown = document.getElementById('tipdown');
+if (tipUp) {
+  tipUp.addEventListener('pointerdown', (e) => { e.preventDefault(); holdTip = 1; });
+}
+if (tipDown) {
+  tipDown.addEventListener('pointerdown', (e) => { e.preventDefault(); holdTip = -1; });
+}
+addEventListener('pointerup', () => { holdYaw = 0; holdTip = 0; });
+addEventListener('pointercancel', () => { holdYaw = 0; holdTip = 0; });
 document.getElementById('reset').addEventListener('click', () => reset());
 const replay = document.getElementById('replay');
 if (replay) replay.addEventListener('click', () => reset());
 
 let dragging = false;
 let lastX = 0;
+let lastY = 0;
 canvas.addEventListener('pointerdown', (e) => {
   dragging = true;
   lastX = e.clientX;
+  lastY = e.clientY;
   canvas.setPointerCapture(e.pointerId);
 });
 canvas.addEventListener('pointermove', (e) => {
   if (!dragging) return;
   yaw += (e.clientX - lastX) * 0.006;
+  tip += (e.clientY - lastY) * -0.005;
+  tip = Math.max(-TIP_MAX, Math.min(TIP_MAX, tip));
   lastX = e.clientX;
+  lastY = e.clientY;
 });
 canvas.addEventListener('pointerup', () => { dragging = false; });
 canvas.addEventListener('pointercancel', () => { dragging = false; });
@@ -196,25 +237,18 @@ addEventListener('resize', () => {
 const clock = new THREE.Clock();
 function frame() {
   const dt = Math.min(clock.getDelta(), 1 / 30);
-  let spin = hold;
+  let spin = holdYaw;
   if (keys.has('KeyA') || keys.has('ArrowLeft')) spin = 1;
   if (keys.has('KeyD') || keys.has('ArrowRight')) spin = -1;
   yaw += spin * ROTATE * dt;
 
-  yawQ.setFromAxisAngle(yAxis, yaw);
-  track.quaternion.copy(yawQ);
-  trackBody.quaternion.set(yawQ.x, yawQ.y, yawQ.z, yawQ.w);
-  trackBody.position.set(0, 0, 0);
-  trackBody.angularVelocity.set(0, 0, 0);
-  trackBody.velocity.set(0, 0, 0);
+  let tilt = holdTip;
+  if (keys.has('KeyW') || keys.has('ArrowUp')) tilt = 1;
+  if (keys.has('KeyS') || keys.has('ArrowDown')) tilt = -1;
+  tip += tilt * TIP_RATE * dt;
+  tip = Math.max(-TIP_MAX, Math.min(TIP_MAX, tip));
 
-  tmpV.copy(flareTip);
-  tmpV.y += 0.12;
-  tmpV.applyQuaternion(yawQ);
-  pin.position.copy(flareTip);
-  pin.position.y += 0.1;
-  tmpQ.copy(yawQ);
-  pin.quaternion.copy(tmpQ);
+  applyTrackPose();
 
   world.step(1 / 60, dt, 3);
 
