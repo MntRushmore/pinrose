@@ -11,58 +11,63 @@
         font-family: Helvetica Neue, Helvetica, Arial, sans-serif;
         touch-action: none;
         -webkit-tap-highlight-color: transparent;
+        user-select: none;
       }
       #ui { position: fixed; inset: 0; z-index: 2; pointer-events: none; }
-      h1 {
-        position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
-        margin: 0; font-weight: 400; letter-spacing: 0.42em;
-        font-size: 13px; color: #3a3828;
+      #brand {
+        position: absolute; top: 18px; left: 50%; transform: translateX(-50%);
+        margin: 0; font-weight: 500; letter-spacing: 0.48em;
+        font-size: 11px; color: #3a3828; opacity: 0.55;
+      }
+      #score {
+        position: absolute; top: 42px; left: 50%; transform: translateX(-50%);
+        margin: 0; font-weight: 600; letter-spacing: -0.04em;
+        font-size: 72px; color: #2e2c20; line-height: 1;
       }
       #hint {
-        position: absolute; top: 36px; left: 50%; transform: translateX(-50%);
-        margin: 0; font-size: 11px; letter-spacing: 0.22em; color: #3a3828;
-        opacity: 0.65;
+        position: absolute; top: 128px; left: 50%; transform: translateX(-50%);
+        margin: 0; font-size: 13px; letter-spacing: 0.18em; color: #3a3828;
+        opacity: 0.55; white-space: nowrap;
       }
-      #hint.hide { display: none; }
-      #overlay.miss #replay { display: none; }
-      .controls {
-        position: absolute; bottom: 20px; left: 0; right: 0;
-        display: flex; justify-content: center; align-items: center; gap: 28px;
-        pointer-events: auto;
-      }
-      button {
-        appearance: none; background: none; border: 0; padding: 10px 8px;
-        color: #3a3828; font-size: 18px; font-weight: 300; letter-spacing: 0.18em;
-        cursor: pointer; pointer-events: auto; line-height: 1;
-        min-width: 44px; min-height: 44px;
-      }
-      button.small { font-size: 11px; letter-spacing: 0.28em; }
+      #hint.hide { opacity: 0; }
       #overlay {
         display: none; position: absolute; inset: 0;
         align-items: center; justify-content: center;
         flex-direction: column; pointer-events: auto;
+        background: rgba(201, 201, 165, 0.72);
       }
       #overlay.show { display: flex; }
       #overlay h2 {
-        font-size: 42px; margin: 0 0 12px; color: #3a3828;
-        font-weight: 400; letter-spacing: 0.36em;
+        font-size: 28px; margin: 0 0 8px; color: #2e2c20;
+        font-weight: 500; letter-spacing: 0.08em; text-align: center;
+        max-width: 80vw;
+      }
+      #over-score {
+        font-size: 84px; font-weight: 600; letter-spacing: -0.04em;
+        color: #2e2c20; line-height: 1; margin: 4px 0 6px;
+      }
+      #over-best {
+        font-size: 14px; letter-spacing: 0.22em; color: #3a3828;
+        opacity: 0.6; margin-bottom: 28px;
+      }
+      #replay {
+        appearance: none; background: #2e2c20; color: #f3f0d8;
+        border: 0; padding: 14px 28px; border-radius: 999px;
+        font-size: 13px; letter-spacing: 0.28em; cursor: pointer;
+        pointer-events: auto;
       }
     </style>
   </head>
   <body>
     <div id="ui">
-      <h1>PINROSE</h1>
-      <p id="hint">drag to steer</p>
-      <div class="controls">
-        <button id="tipdown" type="button" aria-label="tip down">&#9660;</button>
-        <button id="left" type="button" aria-label="rotate left">&#9664;</button>
-        <button id="reset" class="small" type="button">RESET</button>
-        <button id="right" type="button" aria-label="rotate right">&#9654;</button>
-        <button id="tipup" type="button" aria-label="tip up">&#9650;</button>
-      </div>
+      <p id="brand">PINROSE</p>
+      <p id="score">0</p>
+      <p id="hint">hold to charge</p>
       <div id="overlay">
-        <h2>PIN</h2>
-        <button id="replay" class="small" type="button">REPLAY</button>
+        <h2 id="roast">MISS</h2>
+        <div id="over-score">0</div>
+        <div id="over-best">best 0</div>
+        <button id="replay" type="button">PLAY AGAIN</button>
       </div>
     </div>
     <script type="module" src="/src/main.js"></script>

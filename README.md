@@ -1,2 +1,3 @@
 # Pinrose
-play-with-AD-or-drag
+
+Hold to charge, release to launch the red ball at the white pin.
